@@ -50,7 +50,7 @@ def main(params):
                     
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--src_dir", type=str, default="../seedwandb/")
+    parser.add_argument("--src_dir", type=str, default="./seedwandb/")
     parser.add_argument("--project_name", type=str, default="kt_toolkits")
     parser.add_argument("--dataset_names", type=str, default="assist2015")
     parser.add_argument("--model_names", type=str, default="dkt")

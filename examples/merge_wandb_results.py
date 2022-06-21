@@ -94,27 +94,38 @@ def downloads(project_name, sweep_dict, dataset_name="", model_name=""):
             continue
     return all_res, na_res
 
-def get_params(paramsf):
+def get_params(paramsf, model_name, rerun=False):
     lines = open(paramsf).read().split("\n")
     params, params_hy = [], []
-    for i in range(0, len(lines)):
-        cur = lines[i]
-        pre = ""
-        if i > 0:
-            pre = lines[i-1]
-        if pre == "":
-            continue
-        idx = cur.find("values")
-        if idx != -1:
-            key = pre.strip().replace(":", "")
-            params.append(key)
-            
-            if key not in ["fold", "seed"]:
-                params_hy.append(key)
+    if not rerun:
+        for i in range(0, len(lines)):
+            cur = lines[i]
+            pre = ""
+            if i > 0:
+                pre = lines[i-1]
+            if pre == "":
+                continue
+            idx = cur.find("values")
+            if idx != -1:
+                key = pre.strip().replace(":", "")
+                params.append(key)
+                
+                if key not in ["fold", "seed"]:
+                    params_hy.append(key)
+    else:
+        if model_name == "dkvmn":
+            params = ["dataset_name", "model_name", "emb_type", "save_dir", "seed", "fold", "dropout", "dim_s", "learning_rate", "size_m"]
+            params_hy = ["dataset_name", "model_name", "emb_type", "save_dir", "dropout", "dim_s", "learning_rate", "size_m"]
+        elif model_name == "akt":
+            params = ["dataset_name", "model_name", "emb_type", "save_dir", "seed", "fold", "dropout", "d_model", "d_ff", "num_attn_heads", "n_blocks", "learning_rate"]
+            params_hy = ["dataset_name", "model_name", "emb_type", "save_dir", "dropout", "d_model", "d_ff", "num_attn_heads", "n_blocks", "learning_rate"]
+        elif model_name == "saint":
+            params = ["dataset_name", "model_name", "emb_type", "save_dir", "seed", "fold", "dropout", "emb_size", "learning_rate", "num_attn_heads", "n_blocks"]
+            params_hy = ["dataset_name", "model_name", "emb_type", "save_dir", "dropout", "emb_size", "learning_rate", "num_attn_heads", "n_blocks"]
         # print(f"params: {params}, params_hy: {params_hy}")
     return params, params_hy
 
-def read_cur_res(dfs, params_dir, key):
+def read_cur_res(dfs, params_dir, key, rerun=False):
     print(f"dfs: {len(dfs)}")
     dfold, dparams, pams = dict(), dict(), dict()
     all_df = pd.concat(dfs, axis=0)
@@ -123,7 +134,8 @@ def read_cur_res(dfs, params_dir, key):
         df["Name"] = df["Name"].apply(lambda a: int(a.split("-")[-1]))
         df = df.sort_values(by=["Name"])
         paramsf = os.path.join(params_dir, key+"_"+fold+".yaml")
-        params, params_hy = get_params(paramsf)
+        params, params_hy = get_params(paramsf, df["model_name"].tolist()[0], rerun)
+        print(f"params: {params}, params_hy: {params_hy}")
         for i, row in df.iterrows():
             fold, seed = row["fold"], row["seed"]
             params_hystr = "_".join([str(s) for s in row[params_hy].values])
@@ -152,8 +164,9 @@ def read_na(dfs, params_dir, key):
         df = dfs[fold]
         df["Name"] = df["Name"].apply(lambda a: int(a.split("-")[-1]))
         paramsf = os.path.join(params_dir, key+"_"+fold+".yaml")
-        params, params_hy = get_params(paramsf)
+        # params, params_hy = get_params(paramsf)
         if df.shape[0] > 0:
+            params, params_hy = get_params(paramsf, df["model_name"].tolist()[0])
             print(f"read_na! key: {key}, fold: {fold}, na: {df.shape}")
         for i, row in df.iterrows():
             fold, seed = row["fold"], row["seed"]
@@ -191,7 +204,6 @@ def get_results(d, dna):
             names = sorted(dna[fold][best_params][best_seed])
             if names[-1] > best_name:
                 print(f"fold: {fold} best params: {best_params} has na, need retrain!! na name: {names}, best_name: {best_name}")
-
         aucs.append(auc)
         accs.append(acc)
         winaucs.append(winauc)
@@ -246,18 +258,18 @@ def get_results_pamfirst(d):
     print(f"best_params: {best_params}, len: {len(d[best_params])}")
     return maxres
 
-def merge_results(all_res, na_res, params_dir, fold_first=True):
+def merge_results(all_res, na_res, params_dir, fold_first=True, rerun=False):
     diffs = []
     # dataset_name = "all_wandbs"
     for key in all_res:  
         
         dfs = all_res[key]
-        dfold, dparams = read_cur_res(dfs, params_dir, key)
+        dfold, dparams = read_cur_res(dfs, params_dir, key, rerun)
         dna = read_na(na_res[key], params_dir, key)
         if fold_first:
             auc_mean, auc_std, acc_mean, acc_std, winauc_mean, winauc_std, winacc_mean, winacc_std, best_model = get_results(dfold, dna)
-        # else:
-        #     auc_mean, auc_std, acc_mean, acc_std, winauc_mean, winauc_std, winacc_mean, winacc_std = get_results_pamfirst(dparams)
+        #else:
+            #auc_mean, auc_std, acc_mean, acc_std, winauc_mean, winauc_std, winacc_mean, winacc_std = get_results_pamfirst(dparams)
                     
 #         print(f"\nparams: {params}, auc_mean: {auc_mean}, acc_mean: {acc_mean}, winauc_mean: {winauc_mean}, winacc_mean: {winacc_mean}")
 #         print(f"    auc_std: {auc_std}, acc_std: {acc_std}, winauc_std: {winauc_std}, winacc_std: {winacc_std}")
@@ -275,45 +287,114 @@ def extract_hostname(dip2name):
     curhost = dip2name[myaddr]
     return curhost
 
-def cal_res(wandb_config, project, sweep_dict, curhost, dconfig, dataset_name, model_names, update, extract_best_model="", abs_dir="", pred_dir="", launch_file="", generate_all=False, save_dir=""):
+def cal_res(wandb_config, project, sweep_dict, curhost, dconfig, dataset_name, model_names, 
+        update, extract_best_model="", abs_dir="", pred_dir="", launch_file="", generate_all=False, save_dir="", rerun=False):
     model_names = model_names.split(",")
-    for model_name in model_names:
-        dconfig.setdefault(model_name, dict())
-        dconfig[model_name]["machine name"] = curhost
-        if not os.path.exists(save_dir):
-            os.makedirs(save_dir)
-        fname = os.path.join(save_dir, dataset_name + "_" + model_name + ".pkl")
-        if update or not os.path.exists(fname):
-            print("extracting the results from wandb")
-            all_res, na_res = downloads(project, sweep_dict, dataset_name, model_name)
-            pd.to_pickle([all_res,na_res], fname)
-        else:
-            print("reading the results from pkl files")
-            res = pd.read_pickle(fname)
-            all_res, na_res = res[0], res[1]
-        # print("all_res", all_res)
-        best_model_fold_first = merge_results(all_res, na_res, "all_wandbs")
-        # print("="*20)
-        # best_model_params_first = merge_results(all_res, "all_wandbs", False)
+    with open(launch_file,"w") as fallsh:
+        fallsh.write("python check_bestmodel.py 12" + "\n")
+        fallsh.write("result=$?"+ "\n")
+        fallsh.write("if [ $result -eq 0 ];then"+ "\n")
+        fallsh.write("    exit"+ "\n")
+        fallsh.write("else"+ "\n")
 
-        if extract_best_model:
-            print("extracting the best model of {} in {}".format(model_names, dataset_name))
-            model_path_fold_first = []
-            for best_params in best_model_fold_first:
-                if model_name == "sakt":
-                    best_params = best_params.split("_")
-                    best_params[7], best_params[8], best_params[9] = best_params[9], best_params[7], best_params[8]
-                    best_params = "_".join(best_params)
-                # model_path = abs_dir + "/{}_tiaocan_{}/".format(model_name.replace("+","_plus"), dataset_name) + best_params 
-                model_path = abs_dir + "/" + best_params 
-                model_path_fold_first.append(model_path)
-            dconfig[model_name]["model_path_fold_first"] = model_path_fold_first
-            ftarget = os.path.join(pred_dir, "{}_{}_fold_first_predict.yaml".format(dataset_name, model_name))
-            generate_wandb(fpath, ftarget, model_path_fold_first)
-            write_config(dataset_name, dconfig)
-            # wandb_path = "./configs/wandb.json"
-            # sweep_shell = "start_predict.sh"
-            generate_sweep(wandb_config, pred_dir, launch_file, ftarget, generate_all)
+        for model_name in model_names:
+            dconfig.setdefault(model_name, dict())
+            dconfig[model_name]["machine name"] = curhost
+            if not os.path.exists(save_dir):
+                os.makedirs(save_dir)
+            fname = os.path.join(save_dir, dataset_name + "_" + model_name + ".pkl")
+            if update or not os.path.exists(fname):
+                print("extracting the results from wandb")
+                all_res, na_res = downloads(project, sweep_dict, dataset_name, model_name)
+                pd.to_pickle([all_res,na_res], fname)
+            else:
+                print("reading the results from pkl files")
+                res = pd.read_pickle(fname)
+                all_res, na_res = res[0], res[1]
+            # print("all_res", all_res)
+            best_model_fold_first = merge_results(all_res, na_res, "all_wandbs", True, rerun)
+            # print("="*20)
+            # best_model_params_first = merge_results(all_res, "all_wandbs", False)
+
+            if extract_best_model:
+                print("extracting the best model of {} in {}".format(model_names, dataset_name))
+                model_path_fold_first = []
+                for best_params in best_model_fold_first:
+                    if model_name == "sakt":
+                        best_params = best_params.split("_")
+                        best_params[7], best_params[8], best_params[9] = best_params[9], best_params[7], best_params[8]
+                        best_params = "_".join(best_params)
+                    elif model_name == "dkt_forget":
+                        best_params = best_params.split("_")
+                        # print(f"best:params: {best_params}")
+                        best_params[0], best_params[1], best_params[2] = best_params[2], best_params[1], best_params[0]
+                        best_params = "_".join(best_params)
+                        # best_params[7], best_params[8], best_params[9] = best_params[9], best_params[7], best_params[8]
+                    elif model_name == "dkvmn" and rerun:
+                        # algebra2005_dkvmn_qid_dkvmn_tiaocan_algebra2005_42_0_0.4_50_0.01_10/
+                        # dkvmn_algebra2005_qid_dkvmn_tiaocan_algebra2005_0.15_200_0.001_10_42_4
+                        best_params = best_params.split("_")
+                        best_params[0], best_params[1] = best_params[1], best_params[0]
+                        best_params[6], best_params[7], best_params[8], best_params[9], best_params[10], best_params[11] = best_params[10], best_params[11], best_params[6], best_params[7], best_params[8], best_params[9]
+                        best_params = "_".join(best_params)
+                    elif model_name == "akt" and rerun:
+                        # algebra2005_akt_qid_akt_tiaocan_algebra2005_42_1_0.4_512_256_4_4_1e-05/
+                        # akt_algebra2005_qid_akt_tiaocan_algebra2005_0.1_256_256_4_4_0.0001_42_4
+                        # params: {'dataset_name': 'assist2015', 'model_name': 'akt', 'emb_type': 'qid', 'save_dir': 'akt_tiaocan_assist2015', 'seed': 42, 'fold': 4, 'dropout': 0.05, 'd_model': 256, 'd_ff': 256, 'num_attn_heads': 8, 'n_blocks': 4, 'learning_rate': 5e-06}, params_str: assist2015_akt_qid_akt_tiaocan_assist2015_42_4_0.05_256_256_8_4_5e-06
+                        best_params = best_params.split("_")
+                        best_params[0], best_params[1] = best_params[1], best_params[0]
+                        best_params[6], best_params[7], best_params[8], best_params[9], best_params[10], best_params[11], best_params[12], best_params[13] = \
+                                best_params[12], best_params[13], best_params[6], best_params[7], best_params[8], best_params[9], best_params[10], best_params[11]
+                        best_params = "_".join(best_params)
+                    elif model_name == "saint" and rerun:
+                        # need: algebra2005_saint_qid_saint_tiaocan_algebra2005_4_3_0.4_512_0.0001_3407_4
+                        # actul: algebra2005_saint_qid_saint_tiaocan_algebra2005_42_0_0.1_256_0.001_4_1/
+                        best_params = best_params.split("_")
+                        best_params[0], best_params[1] = best_params[1], best_params[0]
+                        best_params[6], best_params[7], best_params[8], best_params[9], best_params[10], best_params[11], best_params[12] = \
+                                best_params[11], best_params[12], best_params[6], best_params[7], best_params[8], best_params[9], best_params[10]
+                        best_params = "_".join(best_params)
+
+                    # model_path = abs_dir + "/{}_tiaocan_{}/".format(model_name.replace("+","_plus"), dataset_name) + best_params 
+                    model_path = abs_dir + "/" + best_params
+                    
+                    #判断最有模型是否在当前机器上
+                    best_model_dir = "./all_bestmodel/{}/{}".format(dataset_name, model_name)
+                    if not os.path.exists(model_path):
+                        print(f"model_path: {model_path} not found!")
+                    else: 
+                        abs_best_dir = os.path.abspath(best_model_dir)
+                        if curhost.startswith("hw"):
+                            if not os.path.exists(best_model_dir):
+                                os.makedirs(best_model_dir)
+                            abs_best_dir = os.path.abspath(best_model_dir).replace("/data/", "/hw/share/")
+                            cmd = "cp -r " + model_path + " " + best_model_dir + "/"
+                            # print("please copy the best model to the best model save path by the following commands!!!")
+                            print(cmd)
+                            os.system(cmd)
+                        elif curhost.startswith("ali"):
+                            if not os.path.exists(best_model_dir):
+                                os.makedirs(best_model_dir)
+                            abs_best_dir = os.path.abspath(best_model_dir)#.replace("/data/", "/hw/share/")
+                            cmd = "cp -r " + model_path + " " + best_model_dir + "/"
+                            # print("please copy the best model to the best model save path by the following commands!!!")
+                            print(cmd)
+                            os.system(cmd)
+                        else:
+                            print("please download the best model to hw machine by the following commands!!!")
+                            #输出复制命令
+                            cmd = "scp -r " + curhost + ":" + model_path + " " + best_model_dir + "/"
+                            print(cmd)
+                        model_path_fold_first.append(os.path.join(abs_best_dir, best_params))
+
+                dconfig[model_name]["model_path_fold_first"] = model_path_fold_first
+                ftarget = os.path.join(pred_dir, "{}_{}_fold_first_predict.yaml".format(dataset_name, model_name))
+                generate_wandb(fpath, ftarget, model_path_fold_first)
+                write_config(dataset_name, dconfig)
+                # wandb_path = "./configs/wandb.json"
+                # sweep_shell = "start_predict.sh"
+                generate_sweep(wandb_config, project, pred_dir, fallsh, ftarget, generate_all)
+        fallsh.write("fi"+ "\n")
 
 def write_config(dataset_name, dconfig):
     with open(CONFIG_FILE) as fin:
@@ -335,19 +416,18 @@ def generate_wandb(fpath, ftarget, model_path):
         yaml.dump(data, fout)
 
 # # 生成启动sweep的脚本
-def generate_sweep(wandb_config, pred_dir, sweep_shell, ftarget, generate_all):
+def generate_sweep(wandb_config, project_name, pred_dir, fallsh, ftarget, generate_all):
     # with open(wandb_path) as fin:
     #     wandb_config = json.load(fin)
     pre = "WANDB_API_KEY=" + wandb_config["api_key"] + " wandb sweep "
-    with open(sweep_shell,"w") as fallsh:
-        if generate_all:
-            files = os.listdir(pred_dir)
-            files = sorted(files)
-            for f in files:
-                fpath = os.path.join(pred_dir, f)
-                fallsh.write(pre + fpath + "\n")
-        else:
-            fallsh.write(pre + ftarget + "\n")
+    if generate_all:
+        files = os.listdir(pred_dir)
+        files = sorted(files)
+        for f in files:
+            fpath = os.path.join(pred_dir, f)
+            fallsh.write("    " + pre + fpath + " -p {}".format(project_name)  + "\n")
+    else:
+        fallsh.write("    " + pre + ftarget + " -p {}".format(project_name) + "\n")
 
 def main(params):
     project_name, dataset_name, model_names, update, extract_best_model, abs_dir, pred_dir, launch_file, generate_all, save_dir = params["project_name"], params["dataset_name"], \
@@ -360,7 +440,8 @@ def main(params):
     print("="*20)
     dconfig = dict()
     curhost = extract_hostname(dip2name)
-    cal_res(wandb_config, project_name, sweep_dict, curhost, dconfig, dataset_name, model_names, update, extract_best_model, abs_dir, pred_dir, launch_file, generate_all, save_dir)
+    cal_res(wandb_config, project_name, sweep_dict, curhost, dconfig, dataset_name, model_names, 
+            update, extract_best_model, abs_dir, pred_dir, launch_file, generate_all, save_dir, params["rerun"])
 
 if __name__ == "__main__":
     api = wandb.Api()
@@ -376,6 +457,7 @@ if __name__ == "__main__":
     parser.add_argument("--pred_dir", type=str, default="pred_wandbs")
     parser.add_argument("--launch_file", type=str, default="start_predict.sh")
     parser.add_argument("--generate_all", type=str2bool, default="False")
+    parser.add_argument("--rerun", type=str2bool, default="False")
 
     args = parser.parse_args()
 

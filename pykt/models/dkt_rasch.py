@@ -6,9 +6,16 @@ from torch import nn
 from torch.nn import Module, Embedding, LSTM, Linear, Dropout
 
 class DKTRasch(Module):
-    def __init__(self, num_c, num_q, emb_size, dropout=0.1, emb_type='qid', emb_path="", pretrain_dim=768, separate_qa=False):
+    def __init__(self, num_c, num_q, emb_size, dropout=0.1, emb_type='qid', emb_path="", pretrain_dim=768, separate_qa=False, use_interac=False, use_qmatrix=False):
         super().__init__()
-        self.model_name = "dkt_rasch"
+        self.use_interac = use_interac
+        if not self.use_interac:
+            self.model_name = "dkt_rasch"
+        else:
+            self.model_name = "dkt_interac"
+        self.use_qmatrix = use_qmatrix
+        if self.use_qmatrix:
+            self.model_name = "dkt_qmatrix"
         self.num_c = num_c
         self.n_question= num_c
         self.n_pid = num_q
@@ -59,9 +66,11 @@ class DKTRasch(Module):
             pid_embed_data = self.difficult_param(pid_data)  # uq 当前problem的难度
             q_embed_data = q_embed_data + pid_embed_data * \
                 q_embed_diff_data  # uq *d_ct + c_ct # question encoder
-
-            qa_embed_diff_data = self.qa_embed_diff(
-                target)  # f_(ct,rt) or #h_rt (qt, rt)差异向量
+            if not self.use_interac:
+                qa_embed_diff_data = self.qa_embed_diff(target)  # f_(ct,rt) or #h_rt (qt, rt)差异向量
+            else:
+                interac_data = q_data + self.num_c * target
+                qa_embed_diff_data = self.qa_embed_diff(interac_data)
             if self.separate_qa:
                 qa_embed_data = qa_embed_data + pid_embed_data * \
                     qa_embed_diff_data  # uq* f_(ct,rt) + e_(ct,rt)

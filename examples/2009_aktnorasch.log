@@ -1,0 +1,20 @@
+wandb: Creating sweep from: all_wandbs/assist2009_akt_norasch_qid_0.yaml
+wandb: Created sweep with ID: 0k0h90z3
+wandb: View sweep at: https://wandb.ai/shyann/pykt_opti/sweeps/0k0h90z3
+wandb: Run sweep agent with: wandb agent shyann/pykt_opti/0k0h90z3
+wandb: Creating sweep from: all_wandbs/assist2009_akt_norasch_qid_1.yaml
+wandb: Created sweep with ID: 4xugpktz
+wandb: View sweep at: https://wandb.ai/shyann/pykt_opti/sweeps/4xugpktz
+wandb: Run sweep agent with: wandb agent shyann/pykt_opti/4xugpktz
+wandb: Creating sweep from: all_wandbs/assist2009_akt_norasch_qid_2.yaml
+wandb: Created sweep with ID: wt88m7z7
+wandb: View sweep at: https://wandb.ai/shyann/pykt_opti/sweeps/wt88m7z7
+wandb: Run sweep agent with: wandb agent shyann/pykt_opti/wt88m7z7
+wandb: Creating sweep from: all_wandbs/assist2009_akt_norasch_qid_3.yaml
+wandb: Created sweep with ID: yo3a5dc7
+wandb: View sweep at: https://wandb.ai/shyann/pykt_opti/sweeps/yo3a5dc7
+wandb: Run sweep agent with: wandb agent shyann/pykt_opti/yo3a5dc7
+wandb: Creating sweep from: all_wandbs/assist2009_akt_norasch_qid_4.yaml
+wandb: Created sweep with ID: kxqimhom
+wandb: View sweep at: https://wandb.ai/shyann/pykt_opti/sweeps/kxqimhom
+wandb: Run sweep agent with: wandb agent shyann/pykt_opti/kxqimhom

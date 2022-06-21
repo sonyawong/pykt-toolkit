@@ -16,7 +16,7 @@ class Dim(IntEnum):
 
 class AKT(nn.Module):
     def __init__(self, n_question, n_pid, d_model, n_blocks, dropout, d_ff=256, 
-            kq_same=1, final_fc_dim=512, num_attn_heads=8, separate_qa=False, l2=1e-5, emb_type="qid", emb_path="", pretrain_dim=768):
+            kq_same=1, final_fc_dim=512, num_attn_heads=8, separate_qa=False, l2=1e-5, emb_type="qid", emb_path="", pretrain_dim=768, use_rasch=True):
         super().__init__()
         """
         Input:
@@ -26,7 +26,11 @@ class AKT(nn.Module):
             d_ff : dimension for fully conntected net inside the basic block
             kq_same: if key query same, kq_same=1, else = 0
         """
-        self.model_name = "akt"
+        self.use_rasch = use_rasch
+        if self.use_rasch:
+            self.model_name = "akt"
+        else:
+            self.model_name = "akt_norasch"
         self.n_question = n_question
         self.dropout = dropout
         self.kq_same = kq_same
@@ -82,7 +86,7 @@ class AKT(nn.Module):
         if emb_type == "qid":
             q_embed_data, qa_embed_data = self.base_emb(q_data, target)
 
-        if self.n_pid > 0: # have problem id
+        if self.use_rasch and self.n_pid > 0: # have problem id
             q_embed_diff_data = self.q_embed_diff(q_data)  # d_ct 总结了包含当前question（concept）的problems（questions）的变化
             pid_embed_data = self.difficult_param(pid_data)  # uq 当前problem的难度
             q_embed_data = q_embed_data + pid_embed_data * \
@@ -128,7 +132,7 @@ class Architecture(nn.Module):
         self.d_model = d_model
         self.model_type = model_type
 
-        if model_type in {'akt'}:
+        if model_type.startswith('akt'):
             self.blocks_1 = nn.ModuleList([
                 TransformerLayer(d_model=d_model, d_feature=d_model // n_heads,
                                  d_ff=d_ff, dropout=dropout, n_heads=n_heads, kq_same=kq_same)

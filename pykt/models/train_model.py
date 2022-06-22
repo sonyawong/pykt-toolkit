@@ -13,7 +13,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 def cal_loss(model, ys, r, rshft, sm, preloss=[]):
     model_name = model.model_name
 
-    if model_name in ["dkt", "dkt_forget", "dkvmn", "kqn", "sakt", "saint", "atkt", "atktfix", "gkt", "skvmn", "dkt_rasch", "dkt_interac"]:
+    if model_name in ["dkt", "dkt_forget", "dkvmn", "kqn", "sakt", "saint", "atkt", "atktfix", "gkt", "skvmn", "dkt_rasch", "dkt_interac", "dkt_qmatrix", "dkt_mastery"]:
 
         y = torch.masked_select(ys[0], sm)
         t = torch.masked_select(rshft, sm)
@@ -32,7 +32,7 @@ def cal_loss(model, ys, r, rshft, sm, preloss=[]):
         loss_w2 = loss_w2.mean() / model.num_c
 
         loss = loss + model.lambda_r * loss_r + model.lambda_w1 * loss_w1 + model.lambda_w2 * loss_w2
-    elif model_name in ["akt", "akt_vector", "akt_norasch"]:
+    elif model_name in ["akt", "akt_vector", "akt_norasch", "akt_mono"]:
         y = torch.masked_select(ys[0], sm)
         t = torch.masked_select(rshft, sm)
         loss = binary_cross_entropy(y, t) + preloss[0]
@@ -78,7 +78,7 @@ def model_forward(model, data):
     elif model_name in ["saint"]:
         y = model(cq.long(), cc.long(), r.long())
         ys.append(y[:, 1:])
-    elif model_name in ["akt", "akt_vector", "akt_norasch"]:               
+    elif model_name in ["akt", "akt_vector", "akt_norasch", "akt_mono"]:               
         y, reg_loss = model(cc.long(), cr.long(), cq.long())
         ys.append(y[:,1:])
         preloss.append(reg_loss)
@@ -105,7 +105,7 @@ def model_forward(model, data):
         cit = torch.cat((d["it_seqs"][:,0:1], dshft["it_seqs"]), dim=1)
         y = model(cq.long(), cr.long(), cat.long(), cit.long())
         ys.append(y[:, 1:])  
-    elif model_name in ["dkt_rasch", "dkt_interac"]:
+    elif model_name in ["dkt_rasch", "dkt_interac", "dkt_qmatrix", "dkt_mastery"]:
         y = model(c.long(), r.long(), q.long())
         y = (y * one_hot(cshft.long(), model.num_c)).sum(-1)
         ys.append(y) # first: yshft        

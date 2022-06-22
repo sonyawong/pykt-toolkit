@@ -16,7 +16,7 @@ class Dim(IntEnum):
 
 class AKTVec(nn.Module):
     def __init__(self, n_question, n_pid, d_model, n_blocks, dropout, d_ff=256, 
-            kq_same=1, final_fc_dim=512, num_attn_heads=8, separate_qa=False, l2=1e-5, emb_type="qid", emb_path="", pretrain_dim=768):
+            kq_same=1, final_fc_dim=512, num_attn_heads=8, separate_qa=False, l2=1e-5, emb_type="qid", emb_path="", pretrain_dim=768, use_qmatrix=False, qmatrix=None, kt_state=False):
         super().__init__()
         """
         Input:
@@ -26,7 +26,14 @@ class AKTVec(nn.Module):
             d_ff : dimension for fully conntected net inside the basic block
             kq_same: if key query same, kq_same=1, else = 0
         """
-        self.model_name = "akt_vector"
+        self.use_qmatrix = use_qmatrix
+        self.kt_state = kt_state
+        if not self.use_qmatrix and not self.kt_state:
+            self.model_name = "akt_vector"
+        elif self.use_qmatrix and not self.kt_state:
+            self.model_name = "akt_qmatrix"
+        elif self.use_qmatrix and self.kt_state:
+            self.model_name = "akt_h"
         self.n_question = n_question
         self.dropout = dropout
         self.kq_same = kq_same
@@ -35,13 +42,20 @@ class AKTVec(nn.Module):
         self.model_type = self.model_name
         self.separate_qa = separate_qa
         self.emb_type = emb_type
+        self.qmatrix = qmatrix
         embed_l = d_model
         if self.n_pid > 0:
             # self.difficult_param = nn.Embedding(self.n_pid+1, 1) # 题目难度
             self.difficult_param = nn.Embedding(self.n_pid+1, embed_l) # 题目难度
-            self.q_embed_diff = nn.Embedding(self.n_question+1, embed_l) # question emb, 总结了包含当前question（concept）的problems（questions）的变化
+            if self.use_qmatrix:
+                self.q_embed_diff = Embedding.from_pretrained(qmatrix, freeze=False)
+            else:
+                self.q_embed_diff = nn.Embedding(self.n_question+1, embed_l) # question emb, 总结了包含当前question（concept）的problems（questions）的变化
             self.qa_embed_diff = nn.Embedding(2 * self.n_question + 1, embed_l) # interaction emb, 同上
-        
+
+        if self.kt_state:
+            h0 = nn.Parameter(torch.Tensor(self.n_question, embed_l))
+
         if emb_type.startswith("qid"):
             # n_question+1 ,d_model
             self.q_embed = nn.Embedding(self.n_question, embed_l)
@@ -49,6 +63,7 @@ class AKTVec(nn.Module):
                 self.qa_embed = nn.Embedding(2*self.n_question+1, embed_l) # interaction emb
             else: # false default
                 self.qa_embed = nn.Embedding(2, embed_l)
+
         # Architecture Object. It contains stack of attention block
         self.model = Architecture(n_question=n_question, n_blocks=n_blocks, n_heads=num_attn_heads, dropout=dropout,
                                     d_model=d_model, d_feature=d_model / num_attn_heads, d_ff=d_ff,  kq_same=self.kq_same, model_type=self.model_type)
@@ -79,12 +94,19 @@ class AKTVec(nn.Module):
 
     def forward(self, q_data, target, pid_data=None, qtest=False):
         emb_type = self.emb_type
+        batch_size = q_data.shape[0]
         # Batch First
         if emb_type == "qid":
             q_embed_data, qa_embed_data = self.base_emb(q_data, target)
 
         if self.n_pid > 0: # have problem id
-            q_embed_diff_data = self.q_embed_diff(q_data)  # d_ct 总结了包含当前question（concept）的problems（questions）的变化
+            if self.use_qmatrix:
+                pid_embed_data = self.q_embed_diff(pid_data)
+                q_embed_diff_data = torch.nn.functional.softmax(pid_embed_data,-1)
+                # print(f"q_embed_diff_data: {q_embed_diff_data.shape}")
+                q_embed_diff_data = torch.einsum('bij, jk -> bik', q_embed_diff_data, self.q_embed.weight)
+            else:
+                q_embed_diff_data = self.q_embed_diff(q_data)  # d_ct 总结了包含当前question（concept）的problems（questions）的变化
             pid_embed_data = self.difficult_param(pid_data)  # uq 当前problem的难度
             q_embed_data = q_embed_data + pid_embed_data + \
                 q_embed_diff_data  # uq *d_ct + c_ct # question encoder
@@ -97,6 +119,7 @@ class AKTVec(nn.Module):
             else:
                 qa_embed_data = qa_embed_data + pid_embed_data + \
                     (qa_embed_diff_data+q_embed_diff_data)  # + uq *(h_rt+d_ct) # （q-response emb diff + question emb diff）
+
             c_reg_loss = (pid_embed_data ** 2.).sum() * self.l2 # rasch部分loss
         else:
             c_reg_loss = 0.
@@ -104,8 +127,8 @@ class AKTVec(nn.Module):
         # BS.seqlen,d_model
         # Pass to the decoder
         # output shape BS,seqlen,d_model or d_model//2
-        d_output = self.model(q_embed_data, qa_embed_data)
 
+        d_output = self.model(q_embed_data, qa_embed_data)
         concat_q = torch.cat([d_output, q_embed_data], dim=-1)
         output = self.out(concat_q).squeeze(-1)
         m = nn.Sigmoid()

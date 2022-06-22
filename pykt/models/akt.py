@@ -16,7 +16,7 @@ class Dim(IntEnum):
 
 class AKT(nn.Module):
     def __init__(self, n_question, n_pid, d_model, n_blocks, dropout, d_ff=256, 
-            kq_same=1, final_fc_dim=512, num_attn_heads=8, separate_qa=False, l2=1e-5, emb_type="qid", emb_path="", pretrain_dim=768, use_rasch=True):
+            kq_same=1, final_fc_dim=512, num_attn_heads=8, separate_qa=False, l2=1e-5, emb_type="qid", emb_path="", pretrain_dim=768, use_rasch=True, monotonic=True):
         super().__init__()
         """
         Input:
@@ -27,10 +27,13 @@ class AKT(nn.Module):
             kq_same: if key query same, kq_same=1, else = 0
         """
         self.use_rasch = use_rasch
-        if self.use_rasch:
+        self.monotonic = monotonic
+        if self.use_rasch and self.monotonic:
             self.model_name = "akt"
-        else:
+        elif not self.use_rasch and self.monotonic:
             self.model_name = "akt_norasch"
+        elif self.use_rasch and not self.monotonic:
+            self.model_name = "akt_mono"
         self.n_question = n_question
         self.dropout = dropout
         self.kq_same = kq_same
@@ -54,7 +57,7 @@ class AKT(nn.Module):
                 self.qa_embed = nn.Embedding(2, embed_l)
         # Architecture Object. It contains stack of attention block
         self.model = Architecture(n_question=n_question, n_blocks=n_blocks, n_heads=num_attn_heads, dropout=dropout,
-                                    d_model=d_model, d_feature=d_model / num_attn_heads, d_ff=d_ff,  kq_same=self.kq_same, model_type=self.model_type)
+                                    d_model=d_model, d_feature=d_model / num_attn_heads, d_ff=d_ff,  kq_same=self.kq_same, model_type=self.model_type, use_monotonic=self.monotonic)
 
         self.out = nn.Sequential(
             nn.Linear(d_model + embed_l,
@@ -121,7 +124,7 @@ class AKT(nn.Module):
 
 class Architecture(nn.Module):
     def __init__(self, n_question,  n_blocks, d_model, d_feature,
-                 d_ff, n_heads, dropout, kq_same, model_type):
+                 d_ff, n_heads, dropout, kq_same, model_type, use_monotonic):
         super().__init__()
         """
             n_block : number of stacked blocks in the attention
@@ -135,12 +138,12 @@ class Architecture(nn.Module):
         if model_type.startswith('akt'):
             self.blocks_1 = nn.ModuleList([
                 TransformerLayer(d_model=d_model, d_feature=d_model // n_heads,
-                                 d_ff=d_ff, dropout=dropout, n_heads=n_heads, kq_same=kq_same)
+                                 d_ff=d_ff, dropout=dropout, n_heads=n_heads, kq_same=kq_same, use_monotonic=use_monotonic)
                 for _ in range(n_blocks)
             ])
             self.blocks_2 = nn.ModuleList([
                 TransformerLayer(d_model=d_model, d_feature=d_model // n_heads,
-                                 d_ff=d_ff, dropout=dropout, n_heads=n_heads, kq_same=kq_same)
+                                 d_ff=d_ff, dropout=dropout, n_heads=n_heads, kq_same=kq_same, use_monotonic=use_monotonic)
                 for _ in range(n_blocks*2)
             ])
 
@@ -173,7 +176,7 @@ class Architecture(nn.Module):
 
 class TransformerLayer(nn.Module):
     def __init__(self, d_model, d_feature,
-                 d_ff, n_heads, dropout,  kq_same):
+                 d_ff, n_heads, dropout,  kq_same, use_monotonic):
         super().__init__()
         """
             This is a Basic Block of Transformer paper. It containts one Multi-head attention object. Followed by layer norm and postion wise feedforward net and dropout layer.
@@ -181,7 +184,7 @@ class TransformerLayer(nn.Module):
         kq_same = kq_same == 1
         # Multi-Head Attention Block
         self.masked_attn_head = MultiHeadAttention(
-            d_model, d_feature, n_heads, dropout, kq_same=kq_same)
+            d_model, d_feature, n_heads, dropout, kq_same=kq_same, use_monotonic=use_monotonic)
 
         # Two layer norm layer and two droput layer
         self.layer_norm1 = nn.LayerNorm(d_model)
@@ -233,7 +236,7 @@ class TransformerLayer(nn.Module):
 
 
 class MultiHeadAttention(nn.Module):
-    def __init__(self, d_model, d_feature, n_heads, dropout, kq_same, bias=True):
+    def __init__(self, d_model, d_feature, n_heads, dropout, kq_same, bias=True, use_monotonic=True):
         super().__init__()
         """
         It has projection layer for getting keys, queries and values. Followed by attention and a connected layer.
@@ -252,6 +255,7 @@ class MultiHeadAttention(nn.Module):
         self.out_proj = nn.Linear(d_model, d_model, bias=bias)
         self.gammas = nn.Parameter(torch.zeros(n_heads, 1, 1))
         torch.nn.init.xavier_uniform_(self.gammas)
+        self.use_monotonic = use_monotonic
 
         self._reset_parameters()
 
@@ -288,8 +292,9 @@ class MultiHeadAttention(nn.Module):
         v = v.transpose(1, 2)
         # calculate attention using function we will define next
         gammas = self.gammas
+        use_monotonic = self.use_monotonic
         scores = attention(q, k, v, self.d_k,
-                           mask, self.dropout, zero_pad, gammas)
+                           mask, self.dropout, zero_pad, gammas, use_monotonic)
 
         # concatenate heads and put through final linear layer
         concat = scores.transpose(1, 2).contiguous()\
@@ -300,7 +305,7 @@ class MultiHeadAttention(nn.Module):
         return output
 
 
-def attention(q, k, v, d_k, mask, dropout, zero_pad, gamma=None):
+def attention(q, k, v, d_k, mask, dropout, zero_pad, gamma=None, use_monotonic=True):
     """
     This is called by Multi-head atention object to find the values.
     """
@@ -309,29 +314,30 @@ def attention(q, k, v, d_k, mask, dropout, zero_pad, gamma=None):
         math.sqrt(d_k)  # BS, 8, seqlen, seqlen
     bs, head, seqlen = scores.size(0), scores.size(1), scores.size(2)
 
-    x1 = torch.arange(seqlen).expand(seqlen, -1).to(device)
-    x2 = x1.transpose(0, 1).contiguous()
+    if use_monotonic:
+        x1 = torch.arange(seqlen).expand(seqlen, -1).to(device)
+        x2 = x1.transpose(0, 1).contiguous()
 
-    with torch.no_grad():
-        scores_ = scores.masked_fill(mask == 0, -1e32)
-        scores_ = F.softmax(scores_, dim=-1)  # BS,8,seqlen,seqlen
-        scores_ = scores_ * mask.float().to(device) # 结果和上一步一样
-        distcum_scores = torch.cumsum(scores_, dim=-1)  # bs, 8, sl, sl
-        disttotal_scores = torch.sum(
-            scores_, dim=-1, keepdim=True)  # bs, 8, sl, 1 全1
-        # print(f"distotal_scores: {disttotal_scores}")
-        position_effect = torch.abs(
-            x1-x2)[None, None, :, :].type(torch.FloatTensor).to(device)  # 1, 1, seqlen, seqlen 位置差值
-        # bs, 8, sl, sl positive distance
-        dist_scores = torch.clamp(
-            (disttotal_scores-distcum_scores)*position_effect, min=0.) # score <0 时，设置为0
-        dist_scores = dist_scores.sqrt().detach()
-    m = nn.Softplus()
-    gamma = -1. * m(gamma).unsqueeze(0)  # 1,8,1,1 一个头一个gamma参数， 对应论文里的theta
-    # Now after do exp(gamma*distance) and then clamp to 1e-5 to 1e5
-    total_effect = torch.clamp(torch.clamp(
-        (dist_scores*gamma).exp(), min=1e-5), max=1e5) # 对应论文公式1中的新增部分
-    scores = scores * total_effect
+        with torch.no_grad():
+            scores_ = scores.masked_fill(mask == 0, -1e32)
+            scores_ = F.softmax(scores_, dim=-1)  # BS,8,seqlen,seqlen
+            scores_ = scores_ * mask.float().to(device) # 结果和上一步一样
+            distcum_scores = torch.cumsum(scores_, dim=-1)  # bs, 8, sl, sl
+            disttotal_scores = torch.sum(
+                scores_, dim=-1, keepdim=True)  # bs, 8, sl, 1 全1
+            # print(f"distotal_scores: {disttotal_scores}")
+            position_effect = torch.abs(
+                x1-x2)[None, None, :, :].type(torch.FloatTensor).to(device)  # 1, 1, seqlen, seqlen 位置差值
+            # bs, 8, sl, sl positive distance
+            dist_scores = torch.clamp(
+                (disttotal_scores-distcum_scores)*position_effect, min=0.) # score <0 时，设置为0
+            dist_scores = dist_scores.sqrt().detach()
+        m = nn.Softplus()
+        gamma = -1. * m(gamma).unsqueeze(0)  # 1,8,1,1 一个头一个gamma参数， 对应论文里的theta
+        # Now after do exp(gamma*distance) and then clamp to 1e-5 to 1e5
+        total_effect = torch.clamp(torch.clamp(
+            (dist_scores*gamma).exp(), min=1e-5), max=1e5) # 对应论文公式1中的新增部分
+        scores = scores * total_effect
 
     scores.masked_fill_(mask == 0, -1e32)
     scores = F.softmax(scores, dim=-1)  # BS,8,seqlen,seqlen

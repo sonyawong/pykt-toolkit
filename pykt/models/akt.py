@@ -34,6 +34,8 @@ class AKT(nn.Module):
             self.model_name = "akt_norasch"
         elif self.use_rasch and not self.monotonic:
             self.model_name = "akt_mono"
+        elif not self.use_rasch and not self.monotonic:
+            self.model_name = "akt_attn"
         self.n_question = n_question
         self.dropout = dropout
         self.kq_same = kq_same

@@ -16,7 +16,7 @@ class Dim(IntEnum):
 
 class AKT(nn.Module):
     def __init__(self, n_question, n_pid, d_model, n_blocks, dropout, d_ff=256, 
-            kq_same=1, final_fc_dim=512, num_attn_heads=8, separate_qa=False, l2=1e-5, emb_type="qid", emb_path="", pretrain_dim=768, use_rasch=True, monotonic=True):
+            kq_same=1, final_fc_dim=512, num_attn_heads=8, seq_len=200, separate_qa=False, l2=1e-5, emb_type="qid", emb_path="", pretrain_dim=768, use_rasch=True, monotonic=True, use_pos=False, rasch_x=False, rasch_y=False):
         super().__init__()
         """
         Input:
@@ -28,14 +28,25 @@ class AKT(nn.Module):
         """
         self.use_rasch = use_rasch
         self.monotonic = monotonic
-        if self.use_rasch and self.monotonic:
+        self.use_pos = use_pos
+        self.rasch_x = rasch_x
+        self.rasch_y = rasch_y
+        if self.use_rasch and self.monotonic and not self.rasch_x and not self.rasch_y:
             self.model_name = "akt"
         elif not self.use_rasch and self.monotonic:
             self.model_name = "akt_norasch"
         elif self.use_rasch and not self.monotonic:
             self.model_name = "akt_mono"
-        elif not self.use_rasch and not self.monotonic:
+        elif self.use_rasch and not self.monotonic and self.use_pos:
+            self.model_name = "aktmono_pos"
+        elif not self.use_rasch and not self.monotonic and not self.use_pos and not self.rasch_x and not self.rasch_y:
             self.model_name = "akt_attn"
+        elif not self.use_rasch and not self.monotonic and self.use_pos and not self.rasch_x and not self.rasch_y:
+            self.model_name = "aktattn_pos"
+        elif self.use_rasch and self.monotonic and self.rasch_x and not self.rasch_y:
+            self.model_name = "akt_raschx"
+        elif self.use_rasch and self.monotonic and self.rasch_y and not self.rasch_x:
+            self.model_name = "akt_raschy"
         self.n_question = n_question
         self.dropout = dropout
         self.kq_same = kq_same
@@ -45,11 +56,12 @@ class AKT(nn.Module):
         self.separate_qa = separate_qa
         self.emb_type = emb_type
         embed_l = d_model
-        if self.n_pid > 0:
+        if self.n_pid > 0 and self.use_rasch:
             self.difficult_param = nn.Embedding(self.n_pid+1, 1) # 题目难度
             self.q_embed_diff = nn.Embedding(self.n_question+1, embed_l) # question emb, 总结了包含当前question（concept）的problems（questions）的变化
-            self.qa_embed_diff = nn.Embedding(2 * self.n_question + 1, embed_l) # interaction emb, 同上
-        
+            if not self.rasch_x:
+                self.qa_embed_diff = nn.Embedding(2 * self.n_question + 1, embed_l) # interaction emb, 同上
+   
         if emb_type.startswith("qid"):
             # n_question+1 ,d_model
             self.q_embed = nn.Embedding(self.n_question, embed_l)
@@ -59,7 +71,7 @@ class AKT(nn.Module):
                 self.qa_embed = nn.Embedding(2, embed_l)
         # Architecture Object. It contains stack of attention block
         self.model = Architecture(n_question=n_question, n_blocks=n_blocks, n_heads=num_attn_heads, dropout=dropout,
-                                    d_model=d_model, d_feature=d_model / num_attn_heads, d_ff=d_ff,  kq_same=self.kq_same, model_type=self.model_type, use_monotonic=self.monotonic)
+                                    d_model=d_model, d_feature=d_model / num_attn_heads, d_ff=d_ff, seq_len=seq_len, kq_same=self.kq_same, model_type=self.model_type, use_monotonic=self.monotonic, use_pos=self.use_pos)
 
         self.out = nn.Sequential(
             nn.Linear(d_model + embed_l,
@@ -77,12 +89,14 @@ class AKT(nn.Module):
 
     def base_emb(self, q_data, target):
         q_embed_data = self.q_embed(q_data)  # BS, seqlen,  d_model# c_ct
+
         if self.separate_qa:
-            qa_data = q_data + self.n_question * target
-            qa_embed_data = self.qa_embed(qa_data)
+            qa_data = q_data + self.n_question * target  
+            qa_embed_data = self.qa_embed(qa_data)  # onehot * w
         else:
             # BS, seqlen, d_model # c_ct+ g_rt =e_(ct,rt)
             qa_embed_data = self.qa_embed(target)+q_embed_data
+
         return q_embed_data, qa_embed_data
 
     def forward(self, q_data, target, pid_data=None, qtest=False):
@@ -92,19 +106,20 @@ class AKT(nn.Module):
             q_embed_data, qa_embed_data = self.base_emb(q_data, target)
 
         if self.use_rasch and self.n_pid > 0: # have problem id
-            q_embed_diff_data = self.q_embed_diff(q_data)  # d_ct 总结了包含当前question（concept）的problems（questions）的变化
             pid_embed_data = self.difficult_param(pid_data)  # uq 当前problem的难度
-            q_embed_data = q_embed_data + pid_embed_data * \
-                q_embed_diff_data  # uq *d_ct + c_ct # question encoder
-
-            qa_embed_diff_data = self.qa_embed_diff(
-                target)  # f_(ct,rt) or #h_rt (qt, rt)差异向量
-            if self.separate_qa:
-                qa_embed_data = qa_embed_data + pid_embed_data * \
-                    qa_embed_diff_data  # uq* f_(ct,rt) + e_(ct,rt)
-            else:
-                qa_embed_data = qa_embed_data + pid_embed_data * \
-                    (qa_embed_diff_data+q_embed_diff_data)  # + uq *(h_rt+d_ct) # （q-response emb diff + question emb diff）
+            q_embed_diff_data = self.q_embed_diff(q_data)  # d_ct 总结了包含当前question（concept）的problems（questions）的变化
+            if not self.rasch_y:
+                q_embed_data = q_embed_data + pid_embed_data * \
+                    q_embed_diff_data  # uq *d_ct + c_ct # question encoder
+            if not self.rasch_x:
+                qa_embed_diff_data = self.qa_embed_diff(
+                    target)  # f_(ct,rt) or #h_rt (qt, rt)差异向量
+                if self.separate_qa:
+                    qa_embed_data = qa_embed_data + pid_embed_data * \
+                        qa_embed_diff_data  # uq* f_(ct,rt) + e_(ct,rt)
+                else:
+                    qa_embed_data = qa_embed_data + pid_embed_data * \
+                        (qa_embed_diff_data+q_embed_diff_data)  # + uq *(h_rt+d_ct) # （q-response emb diff + question emb diff）
             c_reg_loss = (pid_embed_data ** 2.).sum() * self.l2 # rasch部分loss
         else:
             c_reg_loss = 0.
@@ -126,7 +141,7 @@ class AKT(nn.Module):
 
 class Architecture(nn.Module):
     def __init__(self, n_question,  n_blocks, d_model, d_feature,
-                 d_ff, n_heads, dropout, kq_same, model_type, use_monotonic):
+                 d_ff, n_heads, seq_len, dropout, kq_same, model_type, use_monotonic, use_pos):
         super().__init__()
         """
             n_block : number of stacked blocks in the attention
@@ -136,6 +151,11 @@ class Architecture(nn.Module):
         """
         self.d_model = d_model
         self.model_type = model_type
+        self.use_pos = use_pos
+        self.seq_len = seq_len
+
+        if self.use_pos:
+            self.position_emb = CosinePositionalEmbedding(d_model=self.d_model, max_len=self.seq_len)   
 
         if model_type.startswith('akt'):
             self.blocks_1 = nn.ModuleList([
@@ -153,6 +173,11 @@ class Architecture(nn.Module):
         # target shape  bs, seqlen
         seqlen, batch_size = q_embed_data.size(1), q_embed_data.size(0)
 
+        if self.use_pos:
+            q_posemb = self.position_emb(q_embed_data)
+            q_embed_data = q_embed_data + q_posemb
+            qa_posemb = self.position_emb(qa_embed_data)
+            qa_embed_data = qa_embed_data + qa_posemb
         qa_pos_embed = qa_embed_data
         q_pos_embed = q_embed_data
 

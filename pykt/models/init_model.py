@@ -71,10 +71,18 @@ def init_model(model_name, model_config, data_config, emb_type):
         model = AKTVec(data_config["num_c"], data_config["num_q"], **model_config, emb_type=emb_type, emb_path=data_config["emb_path"]).to(device)
     elif model_name == "akt_norasch":
         model = AKT(data_config["num_c"], data_config["num_q"], **model_config, emb_type=emb_type, emb_path=data_config["emb_path"], use_rasch=False).to(device)
+    elif model_name == "akt_raschx":
+        model = AKT(data_config["num_c"], data_config["num_q"], **model_config, emb_type=emb_type, emb_path=data_config["emb_path"], rasch_x=True).to(device)
+    elif model_name == "akt_raschy":
+        model = AKT(data_config["num_c"], data_config["num_q"], **model_config, emb_type=emb_type, emb_path=data_config["emb_path"], rasch_y=True).to(device)
     elif model_name == "akt_mono":
         model = AKT(data_config["num_c"], data_config["num_q"], **model_config, emb_type=emb_type, emb_path=data_config["emb_path"], monotonic=False).to(device)
+    elif model_name == "aktmono_pos":
+        model = AKT(data_config["num_c"], data_config["num_q"], **model_config, emb_type=emb_type, emb_path=data_config["emb_path"], monotonic=False, use_pos=True).to(device)
     elif model_name == "akt_attn":
         model = AKT(data_config["num_c"], data_config["num_q"], **model_config, emb_type=emb_type, emb_path=data_config["emb_path"], use_rasch=False, monotonic=False).to(device)
+    elif model_name == "aktattn_pos":
+        model = AKT(data_config["num_c"], data_config["num_q"], **model_config, emb_type=emb_type, emb_path=data_config["emb_path"], use_rasch=False, monotonic=False, use_pos=True).to(device)
     elif model_name == "dkt_qmatrix":
         qmatrix_path = os.path.join(data_config["dpath"], "qmatrix.npz")
         if os.path.exists(qmatrix_path):

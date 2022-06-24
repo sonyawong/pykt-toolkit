@@ -1,17 +1,17 @@
-program: ./examples/seedwandb/akt_norasch.yamlwandb_akt_train.py
+program: ./wandb_akt_train.py
 method: bayes
 metric:
     goal: maximize
     name: testauc
 parameters:
     model_name:
-        values: ["akt_norasch"]
+        values: ["akt_mono"]
     dataset_name:
         values: ["xes"]
     emb_type:
         values: ["qid"]
     save_dir:
-        values: ["akt_norasch_tiaocan"]
+        values: ["akt_mono_tiaocan"]
     d_model:
         values: [256, 512]
     d_ff:

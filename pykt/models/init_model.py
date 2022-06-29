@@ -17,6 +17,7 @@ from .lpkt import LPKT
 from .lpkt_utils import generate_qmatrix
 from .skvmn import SKVMN
 from .hawkes import HawkesKT
+from .iekt import IEKT
 
 device = "cpu" if not torch.cuda.is_available() else "cuda"
 
@@ -57,8 +58,7 @@ def init_model(model_name, model_config, data_config, emb_type):
         if os.path.exists(qmatrix_path):
             q_matrix = torch.tensor(np.load(qmatrix_path, allow_pickle=True)['matrix']).float()
         else:
-            q_matrix = generate_qmatrix(data_config, gamma=0.03)
-            q_matrix = torch.tensor(q_matrix).float()
+            q_matrix = generate_qmatrix(data_config)
         model = LPKT(data_config["num_at"], data_config["num_it"], data_config["num_q"], data_config["num_c"], **model_config, q_matrix=q_matrix, emb_type=emb_type, emb_path=data_config["emb_path"]).to(device)
     elif model_name == "skvmn":
         model = SKVMN(data_config["num_c"], **model_config, emb_type=emb_type, emb_path=data_config["emb_path"]).to(device)   
@@ -74,6 +74,9 @@ def init_model(model_name, model_config, data_config, emb_type):
         # print("===after init weights")
         # model.printparams()
         model = model.to(device)
+    elif model_name == "iekt":
+        model = IEKT(num_q=data_config['num_q'], num_c=data_config['num_c'],
+                max_concepts=data_config['max_concepts'], **model_config, emb_type=emb_type, emb_path=data_config["emb_path"],device=device).to(device)   
     else:
         print("The wrong model name was used...")
         return None

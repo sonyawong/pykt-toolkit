@@ -15,7 +15,7 @@ class LPKT(nn.Module):
         self.d_a = d_a
         self.d_e = d_e
         q_matrix[q_matrix==0] = gamma
-        self.q_matrix = torch.tensor(q_matrix).float().to(device)
+        self.q_matrix = q_matrix
         self.n_question = n_question
         self.emb_type = emb_type
         self.use_time = use_time
@@ -62,7 +62,7 @@ class LPKT(nn.Module):
         self.sig = nn.Sigmoid()
         self.dropout = nn.Dropout(dropout)
 
-    def forward(self, e_data, a_data, it_data=None, at_data=None):
+    def forward(self, e_data, a_data, it_data=None, at_data=None, qtest=False):
         emb_type = self.emb_type
         batch_size, seq_len = e_data.size(0), e_data.size(1)
         e_embed_data = self.e_embed(e_data)
@@ -135,5 +135,7 @@ class LPKT(nn.Module):
             learning_pre = learning
             h_pre = h
             h_tilde_pre = h_tilde
-
-        return pred
+        if not qtest:
+            return pred
+        else:
+            return pred, h_tilde 

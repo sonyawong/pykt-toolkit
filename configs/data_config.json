@@ -170,8 +170,8 @@
     },
     "junyi2015": {
         "dpath": "../data/junyi2015",
-        "num_q": 5,
-        "num_c": 3,
+        "num_q": 721,
+        "num_c": 39,
         "input_type": [
             "questions",
             "concepts"
